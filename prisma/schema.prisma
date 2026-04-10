@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("karyawan")
+  createdAt DateTime @default(now())
+  items     Item[]
+  transactions Transaction[]
+  auditLogs AuditLog[]
+}
+
+model Item {
+  id          Int      @id @default(autoincrement())
+  name        String
+  stock       Int      @default(0)
+  description String?
+  createdBy   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  transactions Transaction[]
+
+  creator User @relation(fields: [createdBy], references: [id])
+}
+
+model Transaction {
+  id        Int      @id @default(autoincrement())
+  itemId    Int
+  type      String
+  quantity  Int
+  userId    Int
+  createdAt DateTime @default(now())
+
+  item Item @relation(fields: [itemId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([itemId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([type])
+}
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  action      String
+  tableName   String
+  recordId    Int
+  description String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([tableName])
+  @@index([createdAt])
+  @@index([tableName, recordId])
+}
