@@ -4,49 +4,152 @@ const prisma = require("../prisma/client");
 const { AppError } = require("../utils/appError");
 const {
   MIN_PASSWORD_LENGTH,
-  ALLOWED_ROLES,
   isNonEmptyString,
   normalizeEmail,
   isValidEmail,
   isValidPassword,
-  normalizeRole,
-  isAllowedRole
+  normalizeRole
 } = require("../utils/validators");
 
 const SALT_ROUNDS = 12;
 
-const getAllUsers = async () => {
-  return prisma.user.findMany({
+const USER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  createdAt: true,
+  role: {
     select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      createdAt: true
-    },
+      name: true
+    }
+  }
+};
+
+const mapUser = (user) => {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role.name,
+    createdAt: user.createdAt
+  };
+};
+
+const parsePositiveInt = (value, fieldName) => {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new AppError(`${fieldName} must be a positive integer`, 400);
+  }
+
+  return parsed;
+};
+
+const getRoleByName = async (roleName) => {
+  const normalizedRoleName = normalizeRole(roleName);
+
+  if (!isNonEmptyString(normalizedRoleName)) {
+    throw new AppError("Role cannot be empty", 400);
+  }
+
+  const role = await prisma.role.findUnique({
+    where: { name: normalizedRoleName },
+    select: { id: true, name: true }
+  });
+
+  if (!role) {
+    throw new AppError(`Role '${normalizedRoleName}' does not exist`, 400);
+  }
+
+  return role;
+};
+
+const getRoleById = async (roleId) => {
+  const parsedRoleId = parsePositiveInt(roleId, "roleId");
+
+  const role = await prisma.role.findUnique({
+    where: { id: parsedRoleId },
+    select: { id: true, name: true }
+  });
+
+  if (!role) {
+    throw new AppError("Role not found", 400);
+  }
+
+  return role;
+};
+
+const createUser = async ({ name, email, password, roleId }) => {
+  if (!isNonEmptyString(name)) {
+    throw new AppError("Name cannot be empty", 400);
+  }
+
+  if (!isValidEmail(email)) {
+    throw new AppError("Email must be a valid format", 400);
+  }
+
+  if (!isValidPassword(password)) {
+    throw new AppError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`, 400);
+  }
+
+  const normalizedName = name.trim();
+  const normalizedEmail = normalizeEmail(email);
+  const selectedRole = await getRoleById(roleId);
+
+  const existingUser = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    select: { id: true }
+  });
+
+  if (existingUser) {
+    throw new AppError("Email is already registered", 409);
+  }
+
+  const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
+  try {
+    const createdUser = await prisma.user.create({
+      data: {
+        name: normalizedName,
+        email: normalizedEmail,
+        password: hashedPassword,
+        roleId: selectedRole.id
+      },
+      select: USER_SELECT
+    });
+
+    return mapUser(createdUser);
+  } catch (error) {
+    if (error.code === "P2002") {
+      throw new AppError("Email is already in use", 409);
+    }
+
+    throw error;
+  }
+};
+
+const getAllUsers = async () => {
+  const users = await prisma.user.findMany({
+    select: USER_SELECT,
     orderBy: {
       createdAt: "desc"
     }
   });
+
+  return users.map(mapUser);
 };
 
 const getUserById = async (userId) => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      createdAt: true
-    }
+    select: USER_SELECT
   });
 
   if (!user) {
     throw new AppError("User not found", 404);
   }
 
-  return user;
+  return mapUser(user);
 };
 
 const updateUser = async (userId, payload) => {
@@ -81,12 +184,16 @@ const updateUser = async (userId, payload) => {
     updateData.email = normalizeEmail(payload.email);
   }
 
-  if (payload.role !== undefined) {
-    if (!isAllowedRole(payload.role)) {
-      throw new AppError(`Role must be one of: ${ALLOWED_ROLES.join(", ")}`, 400);
-    }
+  if (payload.roleId !== undefined) {
+    const selectedRole = await getRoleById(payload.roleId);
 
-    updateData.role = normalizeRole(payload.role);
+    updateData.roleId = selectedRole.id;
+  }
+
+  if (payload.role !== undefined) {
+    const selectedRole = await getRoleByName(payload.role);
+
+    updateData.roleId = selectedRole.id;
   }
 
   if (payload.password !== undefined) {
@@ -105,16 +212,10 @@ const updateUser = async (userId, payload) => {
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: updateData,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        createdAt: true
-      }
+      select: USER_SELECT
     });
 
-    return updatedUser;
+    return mapUser(updatedUser);
   } catch (error) {
     if (error.code === "P2002") {
       throw new AppError("Email is already in use", 409);
@@ -148,6 +249,7 @@ const deleteUser = async (userId) => {
 };
 
 module.exports = {
+  createUser,
   getAllUsers,
   getUserById,
   updateUser,

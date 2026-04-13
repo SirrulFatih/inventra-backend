@@ -67,8 +67,54 @@ const getTransactionById = async (req, res, next) => {
   }
 };
 
+const approveTransaction = async (req, res, next) => {
+  try {
+    const transaction = await transactionService.approveTransaction(req.transactionIdParam, req.user.id);
+
+    await auditLogService.logActionSafely({
+      userId: req.user.id,
+      action: "UPDATE",
+      tableName: "Transaction",
+      recordId: transaction.id,
+      description: `Transaction ${transaction.id} approved`
+    });
+
+    return sendSuccess(res, {
+      statusCode: 200,
+      message: "Transaction approved successfully",
+      data: transaction
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const rejectTransaction = async (req, res, next) => {
+  try {
+    const transaction = await transactionService.rejectTransaction(req.transactionIdParam);
+
+    await auditLogService.logActionSafely({
+      userId: req.user.id,
+      action: "UPDATE",
+      tableName: "Transaction",
+      recordId: transaction.id,
+      description: `Transaction ${transaction.id} rejected`
+    });
+
+    return sendSuccess(res, {
+      statusCode: 200,
+      message: "Transaction rejected successfully",
+      data: transaction
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   createTransaction,
   getAllTransactions,
-  getTransactionById
+  getTransactionById,
+  approveTransaction,
+  rejectTransaction
 };

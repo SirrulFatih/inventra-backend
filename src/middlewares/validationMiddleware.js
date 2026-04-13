@@ -1,8 +1,8 @@
 const { AppError } = require("../utils/appError");
 const {
   MIN_PASSWORD_LENGTH,
-  ALLOWED_ROLES,
   ALLOWED_TRANSACTION_TYPES,
+  ALLOWED_TRANSACTION_STATUSES,
   ALLOWED_AUDIT_ACTIONS,
   ALLOWED_AUDIT_TABLE_NAMES,
   isNonEmptyString,
@@ -10,9 +10,10 @@ const {
   isValidEmail,
   isValidPassword,
   normalizeRole,
-  isAllowedRole,
   normalizeTransactionType,
   isAllowedTransactionType,
+  normalizeTransactionStatus,
+  isAllowedTransactionStatus,
   normalizeAuditAction,
   isAllowedAuditAction,
   normalizeAuditTableName,
@@ -60,6 +61,18 @@ const parseStock = (stock) => {
   }
 
   return parsedStock;
+};
+
+const parsePermissionIds = (permissionIds) => {
+  if (!Array.isArray(permissionIds)) {
+    throw new AppError("permissionIds must be an array", 400);
+  }
+
+  const parsedPermissionIds = permissionIds.map((permissionId) => {
+    return parsePositiveIntParam(permissionId, "permission");
+  });
+
+  return [...new Set(parsedPermissionIds)];
 };
 
 const validateRegisterPayload = (req, res, next) => {
@@ -335,6 +348,7 @@ const validateTransactionListQuery = (req, res, next) => {
     const rawLimit = req.query.limit;
     const rawItemId = req.query.itemId;
     const rawType = req.query.type;
+    const rawStatus = req.query.status;
     const rawSortBy = req.query.sortBy;
     const rawOrder = req.query.order;
 
@@ -367,6 +381,17 @@ const validateTransactionListQuery = (req, res, next) => {
       }
 
       type = normalizedType;
+    }
+
+    let status;
+    if (rawStatus !== undefined) {
+      const normalizedStatus = normalizeTransactionStatus(rawStatus);
+
+      if (!isAllowedTransactionStatus(normalizedStatus)) {
+        throw new AppError(`status must be one of: ${ALLOWED_TRANSACTION_STATUSES.join(", ")}`, 400);
+      }
+
+      status = normalizedStatus;
     }
 
     const allowedSortBy = ["createdAt", "quantity"];
@@ -405,8 +430,51 @@ const validateTransactionListQuery = (req, res, next) => {
       limit,
       itemId,
       type,
+      status,
       sortBy,
       order
+    };
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const validateCreateUserPayload = (req, res, next) => {
+  try {
+    ensureJsonObjectBody(req.body);
+
+    const payload = req.body;
+    const payloadKeys = Object.keys(payload);
+    const allowedFields = ["name", "email", "password", "roleId"];
+    const invalidFields = payloadKeys.filter((field) => !allowedFields.includes(field));
+
+    if (invalidFields.length > 0) {
+      throw new AppError(`Invalid user fields: ${invalidFields.join(", ")}`, 400);
+    }
+
+    if (!isNonEmptyString(payload.name)) {
+      throw new AppError("Name cannot be empty", 400);
+    }
+
+    if (!isValidEmail(payload.email)) {
+      throw new AppError("Email must be a valid format", 400);
+    }
+
+    if (!isValidPassword(payload.password)) {
+      throw new AppError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`, 400);
+    }
+
+    if (payload.roleId === undefined) {
+      throw new AppError("roleId is required", 400);
+    }
+
+    req.validatedBody = {
+      name: payload.name.trim(),
+      email: normalizeEmail(payload.email),
+      password: payload.password,
+      roleId: parsePositiveIntParam(payload.roleId, "role")
     };
 
     return next();
@@ -421,7 +489,7 @@ const validateUpdateUserPayload = (req, res, next) => {
 
     const payload = req.body;
     const payloadKeys = Object.keys(payload);
-    const allowedFields = ["name", "email", "password", "role"];
+    const allowedFields = ["name", "email", "password", "role", "roleId"];
 
     if (payloadKeys.length === 0) {
       throw new AppError("No valid fields to update", 400);
@@ -460,11 +528,19 @@ const validateUpdateUserPayload = (req, res, next) => {
     }
 
     if (payload.role !== undefined) {
-      if (!isAllowedRole(payload.role)) {
-        throw new AppError(`Role must be one of: ${ALLOWED_ROLES.join(", ")}`, 400);
+      if (!isNonEmptyString(payload.role)) {
+        throw new AppError("Role cannot be empty", 400);
       }
 
       sanitizedPayload.role = normalizeRole(payload.role);
+    }
+
+    if (payload.roleId !== undefined) {
+      sanitizedPayload.roleId = parsePositiveIntParam(payload.roleId, "role");
+    }
+
+    if (sanitizedPayload.role !== undefined && sanitizedPayload.roleId !== undefined) {
+      throw new AppError("Provide either role or roleId, not both", 400);
     }
 
     if (Object.keys(sanitizedPayload).length === 0) {
@@ -543,9 +619,95 @@ const validateAuditLogListQuery = (req, res, next) => {
   }
 };
 
+const validateRoleIdParam = (req, res, next) => {
+  try {
+    const roleId = parsePositiveIntParam(req.params.id, "role");
+    req.roleIdParam = roleId;
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const validateCreateRolePayload = (req, res, next) => {
+  try {
+    ensureJsonObjectBody(req.body);
+
+    const payload = req.body;
+    const payloadKeys = Object.keys(payload);
+    const allowedFields = ["name", "permissionIds"];
+    const invalidFields = payloadKeys.filter((field) => !allowedFields.includes(field));
+
+    if (invalidFields.length > 0) {
+      throw new AppError(`Invalid role fields: ${invalidFields.join(", ")}`, 400);
+    }
+
+    if (!isNonEmptyString(payload.name)) {
+      throw new AppError("Role name cannot be empty", 400);
+    }
+
+    const sanitizedPayload = {
+      name: normalizeRole(payload.name),
+      permissionIds: payload.permissionIds === undefined ? [] : parsePermissionIds(payload.permissionIds)
+    };
+
+    req.validatedBody = sanitizedPayload;
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const validateUpdateRolePayload = (req, res, next) => {
+  try {
+    ensureJsonObjectBody(req.body);
+
+    const payload = req.body;
+    const payloadKeys = Object.keys(payload);
+    const allowedFields = ["name", "permissionIds"];
+
+    if (payloadKeys.length === 0) {
+      throw new AppError("No valid fields to update", 400);
+    }
+
+    const invalidFields = payloadKeys.filter((field) => !allowedFields.includes(field));
+
+    if (invalidFields.length > 0) {
+      throw new AppError(`Invalid update fields: ${invalidFields.join(", ")}`, 400);
+    }
+
+    const sanitizedPayload = {};
+
+    if (payload.name !== undefined) {
+      if (!isNonEmptyString(payload.name)) {
+        throw new AppError("Role name cannot be empty", 400);
+      }
+
+      sanitizedPayload.name = normalizeRole(payload.name);
+    }
+
+    if (payload.permissionIds !== undefined) {
+      sanitizedPayload.permissionIds = parsePermissionIds(payload.permissionIds);
+    }
+
+    if (Object.keys(sanitizedPayload).length === 0) {
+      throw new AppError("No valid fields to update", 400);
+    }
+
+    req.validatedBody = sanitizedPayload;
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   validateRegisterPayload,
   validateLoginPayload,
+  validateCreateUserPayload,
   validateUserIdParam,
   validateUpdateUserPayload,
   validateItemIdParam,
@@ -555,5 +717,8 @@ module.exports = {
   validateCreateTransactionPayload,
   validateTransactionIdParam,
   validateTransactionListQuery,
-  validateAuditLogListQuery
+  validateAuditLogListQuery,
+  validateRoleIdParam,
+  validateCreateRolePayload,
+  validateUpdateRolePayload
 };

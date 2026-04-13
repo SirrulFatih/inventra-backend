@@ -4,6 +4,8 @@ const cors = require("cors");
 const express = require("express");
 const auditLogRoutes = require("./routes/auditLogRoutes");
 const itemRoutes = require("./routes/itemRoutes");
+const permissionRoutes = require("./routes/permissionRoutes");
+const roleRoutes = require("./routes/roleRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
 const userRoutes = require("./routes/userRoutes");
 const { errorHandler, notFound } = require("./middlewares/errorMiddleware");
@@ -21,6 +23,8 @@ app.use("/api/inventra/users", userRoutes);
 app.use("/api/inventra/items", itemRoutes);
 app.use("/api/inventra/transactions", transactionRoutes);
 app.use("/api/inventra/audit-logs", auditLogRoutes);
+app.use("/api/inventra/roles", roleRoutes);
+app.use("/api/inventra/permissions", permissionRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -1,7 +1,7 @@
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
-const ALLOWED_ROLES = ["admin", "karyawan"];
 const ALLOWED_TRANSACTION_TYPES = ["IN", "OUT"];
+const ALLOWED_TRANSACTION_STATUSES = ["PENDING", "APPROVED", "REJECTED"];
 const ALLOWED_AUDIT_ACTIONS = ["CREATE", "UPDATE", "DELETE", "LOGIN"];
 const ALLOWED_AUDIT_TABLE_NAMES = ["User", "Item", "Transaction"];
 
@@ -29,16 +29,20 @@ const normalizeRole = (role) => {
   return String(role).trim().toLowerCase();
 };
 
-const isAllowedRole = (role) => {
-  return ALLOWED_ROLES.includes(normalizeRole(role));
-};
-
 const normalizeTransactionType = (type) => {
   return String(type).trim().toUpperCase();
 };
 
 const isAllowedTransactionType = (type) => {
   return ALLOWED_TRANSACTION_TYPES.includes(normalizeTransactionType(type));
+};
+
+const normalizeTransactionStatus = (status) => {
+  return String(status).trim().toUpperCase();
+};
+
+const isAllowedTransactionStatus = (status) => {
+  return ALLOWED_TRANSACTION_STATUSES.includes(normalizeTransactionStatus(status));
 };
 
 const normalizeAuditAction = (action) => {
@@ -73,8 +77,8 @@ const isAllowedAuditTableName = (tableName) => {
 
 module.exports = {
   MIN_PASSWORD_LENGTH,
-  ALLOWED_ROLES,
   ALLOWED_TRANSACTION_TYPES,
+  ALLOWED_TRANSACTION_STATUSES,
   ALLOWED_AUDIT_ACTIONS,
   ALLOWED_AUDIT_TABLE_NAMES,
   isNonEmptyString,
@@ -82,9 +86,10 @@ module.exports = {
   isValidEmail,
   isValidPassword,
   normalizeRole,
-  isAllowedRole,
   normalizeTransactionType,
   isAllowedTransactionType,
+  normalizeTransactionStatus,
+  isAllowedTransactionStatus,
   normalizeAuditAction,
   isAllowedAuditAction,
   normalizeAuditTableName,

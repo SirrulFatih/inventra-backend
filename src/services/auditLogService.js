@@ -22,9 +22,23 @@ const AUDIT_LOG_SELECT = {
       id: true,
       name: true,
       email: true,
-      role: true
+      role: {
+        select: {
+          name: true
+        }
+      }
     }
   }
+};
+
+const mapAuditLog = (log) => {
+  return {
+    ...log,
+    user: {
+      ...log.user,
+      role: log.user.role.name
+    }
+  };
 };
 
 const parsePositiveInt = (value, fieldName) => {
@@ -64,7 +78,7 @@ const logAction = async ({ userId, action, tableName, recordId, description }) =
     throw new AppError(`tableName must be one of: ${ALLOWED_AUDIT_TABLE_NAMES.join(", ")}`, 400);
   }
 
-  return prisma.auditLog.create({
+  const auditLog = await prisma.auditLog.create({
     data: {
       userId: parsedUserId,
       action: normalizedAction,
@@ -74,6 +88,8 @@ const logAction = async ({ userId, action, tableName, recordId, description }) =
     },
     select: AUDIT_LOG_SELECT
   });
+
+  return mapAuditLog(auditLog);
 };
 
 const logActionSafely = async (payload) => {
@@ -131,7 +147,7 @@ const getAllAuditLogs = async ({ page = 1, limit = 10, userId, action, tableName
   ]);
 
   return {
-    data: logs,
+    data: logs.map(mapAuditLog),
     total,
     page,
     totalPages: total === 0 ? 0 : Math.ceil(total / limit)

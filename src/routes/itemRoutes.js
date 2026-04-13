@@ -2,7 +2,7 @@ const express = require("express");
 
 const itemController = require("../controllers/itemController");
 const { authMiddleware } = require("../middlewares/authMiddleware");
-const { roleMiddleware } = require("../middlewares/roleMiddleware");
+const { checkPermission } = require("../middlewares/permissionMiddleware");
 const {
   validateItemIdParam,
   validateItemListQuery,
@@ -14,10 +14,10 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
-router.post("/", validateCreateItemPayload, itemController.createItem);
-router.get("/", validateItemListQuery, itemController.getAllItems);
-router.get("/:id", validateItemIdParam, itemController.getItemById);
-router.put("/:id", validateItemIdParam, validateUpdateItemPayload, itemController.updateItem);
-router.delete("/:id", validateItemIdParam, roleMiddleware("admin"), itemController.deleteItem);
+router.post("/", checkPermission("manage_items"), validateCreateItemPayload, itemController.createItem);
+router.get("/", checkPermission("manage_items"), validateItemListQuery, itemController.getAllItems);
+router.get("/:id", checkPermission("manage_items"), validateItemIdParam, itemController.getItemById);
+router.put("/:id", checkPermission("manage_items"), validateItemIdParam, validateUpdateItemPayload, itemController.updateItem);
+router.delete("/:id", checkPermission("manage_items"), validateItemIdParam, itemController.deleteItem);
 
 module.exports = router;

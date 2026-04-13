@@ -3,6 +3,29 @@ const auditLogService = require("../services/auditLogService");
 const { AppError } = require("../utils/appError");
 const { sendSuccess } = require("../utils/response");
 
+const createUser = async (req, res, next) => {
+  try {
+    const payload = req.validatedBody || req.body;
+    const createdUser = await userService.createUser(payload);
+
+    await auditLogService.logActionSafely({
+      userId: req.user.id,
+      action: "CREATE",
+      tableName: "User",
+      recordId: createdUser.id,
+      description: `User ${createdUser.id} created`
+    });
+
+    return sendSuccess(res, {
+      statusCode: 201,
+      message: "User created successfully",
+      data: createdUser
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const getAllUsers = async (req, res, next) => {
   try {
     const users = await userService.getAllUsers();
@@ -49,7 +72,7 @@ const updateUser = async (req, res, next) => {
 
     const payload = req.validatedBody || req.body;
 
-    if (!isAdmin && payload.role !== undefined) {
+    if (!isAdmin && (payload.role !== undefined || payload.roleId !== undefined)) {
       throw new AppError("Only admin can update role", 403);
     }
 
@@ -96,6 +119,7 @@ const deleteUser = async (req, res, next) => {
 };
 
 module.exports = {
+  createUser,
   getAllUsers,
   getUserById,
   updateUser,

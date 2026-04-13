@@ -5,6 +5,24 @@ const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
+const PERMISSIONS = [
+  "view_dashboard",
+  "manage_items",
+  "manage_transactions",
+  "approve_transaction",
+  "manage_users",
+  "view_audit_logs"
+];
+
+const ROLES = ["admin", "admin_operasional", "staff", "viewer"];
+
+const ROLE_PERMISSION_MAP = {
+  admin: PERMISSIONS,
+  admin_operasional: ["manage_items", "manage_transactions", "approve_transaction"],
+  staff: ["view_dashboard", "manage_transactions"],
+  viewer: ["view_dashboard"]
+};
+
 const DEFAULT_ADMIN = {
   name: "Inventra Admin",
   email: "admin@inventra.com",
@@ -14,9 +32,80 @@ const DEFAULT_ADMIN = {
 
 const SALT_ROUNDS = 12;
 
-async function seedDefaultAdmin() {
+async function seedPermissionsAndRoles() {
+  const permissions = await Promise.all(
+    PERMISSIONS.map((permissionName) =>
+      prisma.permission.upsert({
+        where: { name: permissionName },
+        update: { name: permissionName },
+        create: { name: permissionName }
+      })
+    )
+  );
+
+  const roles = await Promise.all(
+    ROLES.map((roleName) =>
+      prisma.role.upsert({
+        where: { name: roleName },
+        update: { name: roleName },
+        create: { name: roleName }
+      })
+    )
+  );
+
+  const roleByName = new Map(roles.map((role) => [role.name, role]));
+  const permissionByName = new Map(permissions.map((permission) => [permission.name, permission]));
+
+  const rolePermissionUpserts = [];
+
+  for (const [roleName, permissionNames] of Object.entries(ROLE_PERMISSION_MAP)) {
+    const role = roleByName.get(roleName);
+
+    if (!role) {
+      throw new Error(`Role '${roleName}' is missing while seeding role-permissions`);
+    }
+
+    for (const permissionName of permissionNames) {
+      const permission = permissionByName.get(permissionName);
+
+      if (!permission) {
+        throw new Error(`Permission '${permissionName}' is missing while seeding role-permissions`);
+      }
+
+      rolePermissionUpserts.push(
+        prisma.rolePermission.upsert({
+          where: {
+            roleId_permissionId: {
+              roleId: role.id,
+              permissionId: permission.id
+            }
+          },
+          update: {},
+          create: {
+            roleId: role.id,
+            permissionId: permission.id
+          }
+        })
+      );
+    }
+  }
+
+  await Promise.all(rolePermissionUpserts);
+
+  return {
+    roleByName
+  };
+}
+
+async function seedDefaultAdmin(roleByName) {
+  const adminRole = roleByName.get(DEFAULT_ADMIN.role);
+
+  if (!adminRole) {
+    throw new Error(`Default admin role '${DEFAULT_ADMIN.role}' does not exist`);
+  }
+
   const existingAdmin = await prisma.user.findFirst({
-    where: { role: DEFAULT_ADMIN.role },
+    where: { roleId: adminRole.id },
     select: { id: true, email: true }
   });
 
@@ -32,28 +121,42 @@ async function seedDefaultAdmin() {
     update: {
       name: DEFAULT_ADMIN.name,
       password: hashedPassword,
-      role: DEFAULT_ADMIN.role
+      roleId: adminRole.id
     },
     create: {
       name: DEFAULT_ADMIN.name,
       email: DEFAULT_ADMIN.email,
       password: hashedPassword,
-      role: DEFAULT_ADMIN.role
+      roleId: adminRole.id
     },
     select: {
       id: true,
       email: true,
-      role: true,
-      createdAt: true
+      createdAt: true,
+      role: {
+        select: {
+          name: true
+        }
+      }
     }
   });
 
-  console.log("Default admin is ready:", adminUser);
+  console.log("Default admin is ready:", {
+    id: adminUser.id,
+    email: adminUser.email,
+    role: adminUser.role.name,
+    createdAt: adminUser.createdAt
+  });
 }
 
-seedDefaultAdmin()
+async function main() {
+  const { roleByName } = await seedPermissionsAndRoles();
+  await seedDefaultAdmin(roleByName);
+}
+
+main()
   .catch((error) => {
-    console.error("Failed to seed default admin:", error);
+    console.error("Failed to seed RBAC data:", error);
     process.exitCode = 1;
   })
   .finally(async () => {
