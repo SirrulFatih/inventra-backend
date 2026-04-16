@@ -7,20 +7,29 @@ const prisma = new PrismaClient();
 
 const PERMISSIONS = [
   "view_dashboard",
+  "read_items",
   "manage_items",
+  "read_transactions",
   "manage_transactions",
-  "approve_transaction",
+  "read_audit_logs",
   "manage_users",
-  "view_audit_logs"
+  "manage_roles"
 ];
 
 const ROLES = ["admin", "admin_operasional", "staff", "viewer"];
 
 const ROLE_PERMISSION_MAP = {
   admin: PERMISSIONS,
-  admin_operasional: ["manage_items", "manage_transactions", "approve_transaction"],
-  staff: ["view_dashboard", "manage_transactions"],
-  viewer: ["view_dashboard"]
+  admin_operasional: [
+    "view_dashboard",
+    "read_items",
+    "manage_items",
+    "read_transactions",
+    "manage_transactions",
+    "read_audit_logs"
+  ],
+  staff: ["view_dashboard", "read_items", "read_transactions", "manage_transactions"],
+  viewer: ["view_dashboard", "read_items", "read_transactions", "read_audit_logs"]
 };
 
 const DEFAULT_ADMIN = {

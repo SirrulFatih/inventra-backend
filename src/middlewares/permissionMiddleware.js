@@ -28,6 +28,42 @@ const checkPermission = (permissionName) => {
   };
 };
 
+const checkAnyPermission = (permissionNames) => {
+  if (!Array.isArray(permissionNames) || permissionNames.length === 0) {
+    throw new AppError("At least one permission name is required", 500);
+  }
+
+  const normalizedPermissions = permissionNames.map((permissionName) => {
+    if (typeof permissionName !== "string" || permissionName.trim().length === 0) {
+      throw new AppError("Permission name is required", 500);
+    }
+
+    return permissionName.trim();
+  });
+
+  return async (req, res, next) => {
+    try {
+      if (!req.user || !req.user.id) {
+        throw new AppError("Unauthorized", 401);
+      }
+
+      const permissions = await getUserPermissions(req.user.id);
+      req.user.permissions = permissions;
+
+      const hasAnyPermission = normalizedPermissions.some((permissionName) => permissions.includes(permissionName));
+
+      if (!hasAnyPermission) {
+        throw new AppError("Forbidden", 403);
+      }
+
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  };
+};
+
 module.exports = {
-  checkPermission
+  checkPermission,
+  checkAnyPermission
 };

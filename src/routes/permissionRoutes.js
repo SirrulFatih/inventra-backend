@@ -6,6 +6,6 @@ const { checkPermission } = require("../middlewares/permissionMiddleware");
 
 const router = express.Router();
 
-router.get("/", authMiddleware, checkPermission("manage_users"), roleController.getAllPermissions);
+router.get("/", authMiddleware, checkPermission("manage_roles"), roleController.getAllPermissions);
 
 module.exports = router;

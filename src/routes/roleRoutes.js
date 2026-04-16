@@ -2,7 +2,7 @@ const express = require("express");
 
 const roleController = require("../controllers/roleController");
 const { authMiddleware } = require("../middlewares/authMiddleware");
-const { checkPermission } = require("../middlewares/permissionMiddleware");
+const { checkAnyPermission, checkPermission } = require("../middlewares/permissionMiddleware");
 const {
   validateRoleIdParam,
   validateCreateRolePayload,
@@ -11,11 +11,11 @@ const {
 
 const router = express.Router();
 
-router.use(authMiddleware, checkPermission("manage_users"));
+router.use(authMiddleware);
 
-router.get("/", roleController.getAllRoles);
-router.post("/", validateCreateRolePayload, roleController.createRole);
-router.put("/:id", validateRoleIdParam, validateUpdateRolePayload, roleController.updateRole);
-router.delete("/:id", validateRoleIdParam, roleController.deleteRole);
+router.get("/", checkAnyPermission(["manage_users", "manage_roles"]), roleController.getAllRoles);
+router.post("/", checkPermission("manage_roles"), validateCreateRolePayload, roleController.createRole);
+router.put("/:id", checkPermission("manage_roles"), validateRoleIdParam, validateUpdateRolePayload, roleController.updateRole);
+router.delete("/:id", checkPermission("manage_roles"), validateRoleIdParam, roleController.deleteRole);
 
 module.exports = router;
