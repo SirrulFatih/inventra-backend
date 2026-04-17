@@ -11,6 +11,7 @@ const PERMISSIONS = [
   "manage_items",
   "read_transactions",
   "manage_transactions",
+  "approve_transactions",
   "read_audit_logs",
   "manage_users",
   "manage_roles"
@@ -26,6 +27,7 @@ const ROLE_PERMISSION_MAP = {
     "manage_items",
     "read_transactions",
     "manage_transactions",
+    "approve_transactions",
     "read_audit_logs"
   ],
   staff: ["view_dashboard", "read_items", "read_transactions", "manage_transactions"],

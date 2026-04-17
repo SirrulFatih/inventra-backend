@@ -18,13 +18,13 @@ router.get("/", checkAnyPermission(["read_transactions", "manage_transactions"])
 router.get("/:id", checkAnyPermission(["read_transactions", "manage_transactions"]), validateTransactionIdParam, transactionController.getTransactionById);
 router.patch(
   "/:id/approve",
-  checkPermission("manage_transactions"),
+  checkPermission("approve_transactions"),
   validateTransactionIdParam,
   transactionController.approveTransaction
 );
 router.patch(
   "/:id/reject",
-  checkPermission("manage_transactions"),
+  checkPermission("approve_transactions"),
   validateTransactionIdParam,
   transactionController.rejectTransaction
 );
