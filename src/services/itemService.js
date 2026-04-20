@@ -6,10 +6,18 @@ const ITEM_SELECT = {
   id: true,
   name: true,
   stock: true,
+  reservedStock: true,
   description: true,
   createdBy: true,
   createdAt: true,
   updatedAt: true
+};
+
+const mapItem = (item) => {
+  return {
+    ...item,
+    availableStock: item.stock - item.reservedStock
+  };
 };
 
 const parseStock = (stock) => {
@@ -39,15 +47,17 @@ const sanitizeDescription = (description) => {
   return trimmedDescription.length > 0 ? trimmedDescription : null;
 };
 
-const assertItemExists = async (itemId) => {
+const assertItemExists = async (itemId, select = { id: true }) => {
   const existingItem = await prisma.item.findUnique({
     where: { id: itemId },
-    select: { id: true }
+    select
   });
 
   if (!existingItem) {
     throw new AppError("Item not found", 404);
   }
+
+  return existingItem;
 };
 
 const createItem = async ({ name, stock = 0, description, createdBy }) => {
@@ -64,7 +74,7 @@ const createItem = async ({ name, stock = 0, description, createdBy }) => {
   const sanitizedDescription = sanitizeDescription(description);
 
   try {
-    return await prisma.item.create({
+    const item = await prisma.item.create({
       data: {
         name: name.trim(),
         stock: parsedStock,
@@ -73,6 +83,8 @@ const createItem = async ({ name, stock = 0, description, createdBy }) => {
       },
       select: ITEM_SELECT
     });
+
+    return mapItem(item);
   } catch (error) {
     if (error.code === "P2003") {
       throw new AppError("Invalid creator user", 400);
@@ -108,7 +120,7 @@ const getAllItems = async ({ page = 1, limit = 10, search } = {}) => {
   ]);
 
   return {
-    data: items,
+    data: items.map(mapItem),
     total,
     page,
     totalPages: total === 0 ? 0 : Math.ceil(total / limit)
@@ -125,7 +137,7 @@ const getItemById = async (itemId) => {
     throw new AppError("Item not found", 404);
   }
 
-  return item;
+  return mapItem(item);
 };
 
 const updateItem = async (itemId, payload) => {
@@ -167,13 +179,22 @@ const updateItem = async (itemId, payload) => {
     throw new AppError("No valid fields to update", 400);
   }
 
-  await assertItemExists(itemId);
+  const existingItem = await assertItemExists(itemId, {
+    id: true,
+    reservedStock: true
+  });
 
-  return prisma.item.update({
+  if (updateData.stock !== undefined && updateData.stock < existingItem.reservedStock) {
+    throw new AppError("Stock cannot be less than reserved stock", 400);
+  }
+
+  const updatedItem = await prisma.item.update({
     where: { id: itemId },
     data: updateData,
     select: ITEM_SELECT
   });
+
+  return mapItem(updatedItem);
 };
 
 const deleteItem = async (itemId) => {

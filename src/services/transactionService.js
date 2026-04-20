@@ -13,6 +13,16 @@ const TRANSACTION_STATUS = {
   REJECTED: "REJECTED"
 };
 
+const INSUFFICIENT_AVAILABLE_STOCK_MESSAGE = "Insufficient available stock";
+const RESERVED_STOCK_INCONSISTENT_MESSAGE = "Reserved stock is inconsistent";
+
+const mapItemStock = (item) => {
+  return {
+    ...item,
+    availableStock: item.stock - item.reservedStock
+  };
+};
+
 const TRANSACTION_SELECT = {
   id: true,
   itemId: true,
@@ -26,7 +36,8 @@ const TRANSACTION_SELECT = {
     select: {
       id: true,
       name: true,
-      stock: true
+      stock: true,
+      reservedStock: true
     }
   },
   user: {
@@ -49,16 +60,28 @@ const TRANSACTION_SELECT = {
 };
 
 const mapTransaction = (transaction) => {
-  const { approvedByUser, user, ...transactionData } = transaction;
+  const { approvedByUser, item, user, ...transactionData } = transaction;
 
   return {
     ...transactionData,
     approvedBy: approvedByUser ? approvedByUser.name : null,
+    item: item ? mapItemStock(item) : undefined,
     user: {
       ...user,
       role: user.role.name
     }
   };
+};
+
+const reserveStockForPendingOutTransaction = async (tx, { itemId, quantity }) => {
+  const updateCount = await tx.$executeRaw`
+    UPDATE Item
+    SET reservedStock = reservedStock + ${quantity}
+    WHERE id = ${itemId}
+      AND (stock - reservedStock) >= ${quantity}
+  `;
+
+  return Number(updateCount);
 };
 
 const parsePositiveInt = (value, fieldName) => {
@@ -81,27 +104,58 @@ const createTransaction = async ({ itemId, type, quantity, userId }) => {
     throw new AppError("Type must be IN or OUT", 400);
   }
 
-  const item = await prisma.item.findUnique({
-    where: { id: parsedItemId },
-    select: { id: true }
-  });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const item = await tx.item.findUnique({
+        where: { id: parsedItemId },
+        select: {
+          id: true,
+          stock: true,
+          reservedStock: true
+        }
+      });
 
-  if (!item) {
-    throw new AppError("Item not found", 404);
+      if (!item) {
+        throw new AppError("Item not found", 404);
+      }
+
+      if (normalizedType === "OUT") {
+        const availableStock = item.stock - item.reservedStock;
+
+        if (availableStock < parsedQuantity) {
+          throw new AppError(INSUFFICIENT_AVAILABLE_STOCK_MESSAGE, 400);
+        }
+
+        const updateCount = await reserveStockForPendingOutTransaction(tx, {
+          itemId: parsedItemId,
+          quantity: parsedQuantity
+        });
+
+        if (updateCount === 0) {
+          throw new AppError(INSUFFICIENT_AVAILABLE_STOCK_MESSAGE, 400);
+        }
+      }
+
+      const transaction = await tx.transaction.create({
+        data: {
+          itemId: parsedItemId,
+          type: normalizedType,
+          quantity: parsedQuantity,
+          userId: parsedUserId,
+          status: TRANSACTION_STATUS.PENDING
+        },
+        select: TRANSACTION_SELECT
+      });
+
+      return mapTransaction(transaction);
+    });
+  } catch (error) {
+    if (error.code === "P2003") {
+      throw new AppError("Invalid transaction user", 400);
+    }
+
+    throw error;
   }
-
-  const transaction = await prisma.transaction.create({
-    data: {
-      itemId: parsedItemId,
-      type: normalizedType,
-      quantity: parsedQuantity,
-      userId: parsedUserId,
-      status: TRANSACTION_STATUS.PENDING
-    },
-    select: TRANSACTION_SELECT
-  });
-
-  return mapTransaction(transaction);
 };
 
 const getAllTransactions = async ({ page = 1, limit = 10, itemId, type, status, sortBy = "createdAt", order = "desc" } = {}) => {
@@ -227,17 +281,23 @@ const approveTransaction = async (transactionId, approverUserId) => {
             id: existingTransaction.itemId,
             stock: {
               gte: existingTransaction.quantity
+            },
+            reservedStock: {
+              gte: existingTransaction.quantity
             }
           },
           data: {
             stock: {
+              decrement: existingTransaction.quantity
+            },
+            reservedStock: {
               decrement: existingTransaction.quantity
             }
           }
         });
 
         if (updateResult.count === 0) {
-          throw new AppError("Insufficient stock", 400);
+          throw new AppError(RESERVED_STOCK_INCONSISTENT_MESSAGE, 400);
         }
       }
 
@@ -265,37 +325,62 @@ const approveTransaction = async (transactionId, approverUserId) => {
 const rejectTransaction = async (transactionId) => {
   const parsedTransactionId = parsePositiveInt(transactionId, "transactionId");
 
-  const transaction = await prisma.transaction.findUnique({
-    where: { id: parsedTransactionId },
-    select: {
-      id: true,
-      status: true
+  return prisma.$transaction(async (tx) => {
+    const transaction = await tx.transaction.findUnique({
+      where: { id: parsedTransactionId },
+      select: {
+        id: true,
+        itemId: true,
+        type: true,
+        quantity: true,
+        status: true
+      }
+    });
+
+    if (!transaction) {
+      throw new AppError("Transaction not found", 404);
     }
+
+    if (transaction.status === TRANSACTION_STATUS.REJECTED) {
+      throw new AppError("Transaction is already rejected", 400);
+    }
+
+    if (transaction.status === TRANSACTION_STATUS.APPROVED) {
+      throw new AppError("Approved transaction cannot be rejected", 400);
+    }
+
+    if (transaction.type === "OUT") {
+      const updateResult = await tx.item.updateMany({
+        where: {
+          id: transaction.itemId,
+          reservedStock: {
+            gte: transaction.quantity
+          }
+        },
+        data: {
+          reservedStock: {
+            decrement: transaction.quantity
+          }
+        }
+      });
+
+      if (updateResult.count === 0) {
+        throw new AppError(RESERVED_STOCK_INCONSISTENT_MESSAGE, 400);
+      }
+    }
+
+    const rejectedTransaction = await tx.transaction.update({
+      where: { id: parsedTransactionId },
+      data: {
+        status: TRANSACTION_STATUS.REJECTED,
+        approvedBy: null,
+        approvedAt: null
+      },
+      select: TRANSACTION_SELECT
+    });
+
+    return mapTransaction(rejectedTransaction);
   });
-
-  if (!transaction) {
-    throw new AppError("Transaction not found", 404);
-  }
-
-  if (transaction.status === TRANSACTION_STATUS.REJECTED) {
-    throw new AppError("Transaction is already rejected", 400);
-  }
-
-  if (transaction.status === TRANSACTION_STATUS.APPROVED) {
-    throw new AppError("Approved transaction cannot be rejected", 400);
-  }
-
-  const rejectedTransaction = await prisma.transaction.update({
-    where: { id: parsedTransactionId },
-    data: {
-      status: TRANSACTION_STATUS.REJECTED,
-      approvedBy: null,
-      approvedAt: null
-    },
-    select: TRANSACTION_SELECT
-  });
-
-  return mapTransaction(rejectedTransaction);
 };
 
 module.exports = {
