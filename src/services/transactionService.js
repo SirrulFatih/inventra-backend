@@ -94,6 +94,12 @@ const parsePositiveInt = (value, fieldName) => {
   return parsed;
 };
 
+const assertStockConsistency = (item) => {
+  if (item.stock < item.reservedStock) {
+    throw new AppError(RESERVED_STOCK_INCONSISTENT_MESSAGE, 400);
+  }
+};
+
 const createTransaction = async ({ itemId, type, quantity, userId }) => {
   const parsedItemId = parsePositiveInt(itemId, "itemId");
   const parsedQuantity = parsePositiveInt(quantity, "quantity");
@@ -118,6 +124,8 @@ const createTransaction = async ({ itemId, type, quantity, userId }) => {
       if (!item) {
         throw new AppError("Item not found", 404);
       }
+
+      assertStockConsistency(item);
 
       if (normalizedType === "OUT") {
         const availableStock = item.stock - item.reservedStock;
@@ -258,12 +266,8 @@ const approveTransaction = async (transactionId, approverUserId) => {
         throw new AppError("Transaction not found", 404);
       }
 
-      if (existingTransaction.status === TRANSACTION_STATUS.APPROVED) {
-        throw new AppError("Transaction is already approved", 400);
-      }
-
-      if (existingTransaction.status === TRANSACTION_STATUS.REJECTED) {
-        throw new AppError("Rejected transaction cannot be approved", 400);
+      if (existingTransaction.status !== TRANSACTION_STATUS.PENDING) {
+        throw new AppError("Invalid transaction state", 400);
       }
 
       if (existingTransaction.type === "IN") {
@@ -308,6 +312,8 @@ const approveTransaction = async (transactionId, approverUserId) => {
           if (!itemSnapshot) {
             throw new AppError("Item not found", 404);
           }
+
+          assertStockConsistency(itemSnapshot);
 
           if (itemSnapshot.stock < existingTransaction.quantity) {
             throw new AppError("Insufficient stock", 400);
@@ -378,18 +384,15 @@ const rejectTransaction = async (transactionId) => {
       throw new AppError("Transaction not found", 404);
     }
 
-    if (transaction.status === TRANSACTION_STATUS.REJECTED) {
-      throw new AppError("Transaction is already rejected", 400);
-    }
-
-    if (transaction.status === TRANSACTION_STATUS.APPROVED) {
-      throw new AppError("Approved transaction cannot be rejected", 400);
+    if (transaction.status !== TRANSACTION_STATUS.PENDING) {
+      throw new AppError("Invalid transaction state", 400);
     }
 
     if (transaction.type === "OUT") {
       const itemSnapshot = await tx.item.findUnique({
         where: { id: transaction.itemId },
         select: {
+          stock: true,
           reservedStock: true
         }
       });
@@ -397,6 +400,8 @@ const rejectTransaction = async (transactionId) => {
       if (!itemSnapshot) {
         throw new AppError("Item not found", 404);
       }
+
+      assertStockConsistency(itemSnapshot);
 
       if (itemSnapshot.reservedStock >= transaction.quantity) {
         const updateResult = await tx.item.updateMany({
