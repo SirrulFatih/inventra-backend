@@ -10,6 +10,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
     "seed:admin": "node prisma/seed.js",
+    "stock:reconcile": "node prisma/reconcile-reserved-stock.js",
     "test": "echo \"No tests configured\""
   },
   "keywords": [],

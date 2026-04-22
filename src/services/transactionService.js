@@ -297,7 +297,44 @@ const approveTransaction = async (transactionId, approverUserId) => {
         });
 
         if (updateResult.count === 0) {
-          throw new AppError(RESERVED_STOCK_INCONSISTENT_MESSAGE, 400);
+          const itemSnapshot = await tx.item.findUnique({
+            where: { id: existingTransaction.itemId },
+            select: {
+              stock: true,
+              reservedStock: true
+            }
+          });
+
+          if (!itemSnapshot) {
+            throw new AppError("Item not found", 404);
+          }
+
+          if (itemSnapshot.stock < existingTransaction.quantity) {
+            throw new AppError("Insufficient stock", 400);
+          }
+
+          // Backward compatibility for old pending OUT transactions created before reservation rollout.
+          if (itemSnapshot.reservedStock < existingTransaction.quantity) {
+            const legacyUpdateResult = await tx.item.updateMany({
+              where: {
+                id: existingTransaction.itemId,
+                stock: {
+                  gte: existingTransaction.quantity
+                }
+              },
+              data: {
+                stock: {
+                  decrement: existingTransaction.quantity
+                }
+              }
+            });
+
+            if (legacyUpdateResult.count === 0) {
+              throw new AppError("Insufficient stock", 400);
+            }
+          } else {
+            throw new AppError(RESERVED_STOCK_INCONSISTENT_MESSAGE, 400);
+          }
         }
       }
 
@@ -350,22 +387,35 @@ const rejectTransaction = async (transactionId) => {
     }
 
     if (transaction.type === "OUT") {
-      const updateResult = await tx.item.updateMany({
-        where: {
-          id: transaction.itemId,
-          reservedStock: {
-            gte: transaction.quantity
-          }
-        },
-        data: {
-          reservedStock: {
-            decrement: transaction.quantity
-          }
+      const itemSnapshot = await tx.item.findUnique({
+        where: { id: transaction.itemId },
+        select: {
+          reservedStock: true
         }
       });
 
-      if (updateResult.count === 0) {
-        throw new AppError(RESERVED_STOCK_INCONSISTENT_MESSAGE, 400);
+      if (!itemSnapshot) {
+        throw new AppError("Item not found", 404);
+      }
+
+      if (itemSnapshot.reservedStock >= transaction.quantity) {
+        const updateResult = await tx.item.updateMany({
+          where: {
+            id: transaction.itemId,
+            reservedStock: {
+              gte: transaction.quantity
+            }
+          },
+          data: {
+            reservedStock: {
+              decrement: transaction.quantity
+            }
+          }
+        });
+
+        if (updateResult.count === 0) {
+          throw new AppError(RESERVED_STOCK_INCONSISTENT_MESSAGE, 400);
+        }
       }
     }
 
